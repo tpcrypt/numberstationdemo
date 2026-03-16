@@ -38,6 +38,7 @@ $encodeMap = $singleDigits + $doubleDigits;
 $decodeSingleMap = array_flip($singleDigits);
 $decodeDoubleMap = array_flip($doubleDigits);
 $defaultExample = 'REPORT AGENT STATUS MEET TUESDAY';
+$defaultPreamble = 'Educational demo preamble for this transmission.';
 
 function normalize_text(string $input): string
 {
@@ -525,6 +526,18 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
                             </tbody>
                         </table>
                     </div>
+
+                    <div class="row g-3 align-items-end mt-1">
+                        <div class="col-lg-8">
+                            <label class="form-label" for="preambleInput">Broadcast preamble</label>
+                            <textarea class="form-control" id="preambleInput" rows="2" placeholder="Optional words to read aloud before the digits"><?=$defaultPreamble?></textarea>
+                            <div class="form-text">Spoken before the transmission as: "Preamble. [your text]."</div>
+                        </div>
+                        <div class="col-lg-4">
+                            <div class="status-text mb-2">Current preamble</div>
+                            <div class="result-box rounded-4 p-3" id="preamblePreview"></div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -583,7 +596,9 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
             <section class="tab-pane fade" id="transmit-panel" role="tabpanel" aria-labelledby="transmit-tab" tabindex="0">
                 <div class="transmit-alert rounded-4 p-4">
                     <h2 class="h4 mb-2">Transmit</h2>
-                    <p class="mb-3 text-light-emphasis">Atencion. Message number 047. Digits are spoken individually with short pauses between groups. Use the speed control to match the room and the device you are demoing on.</p>
+                    <p class="mb-3 text-light-emphasis">Atencion. The current encoded groups are spoken digit by digit with short pauses between groups. Use the speed control to match the room and the device you are demoing on.</p>
+                    <div class="status-text mb-2">Active preamble</div>
+                    <div class="result-box rounded-4 p-3 mb-3" id="transmitPreambleOutput"></div>
                     <div class="result-box rounded-4 p-3 mono mb-3" id="transmitOutput"></div>
                     <div class="row g-3 align-items-end mb-3">
                         <div class="col-lg-8">
@@ -656,6 +671,7 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
         const DECODE_SINGLE_MAP = <?=json_encode($decodeSingleMap, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)?>;
         const DECODE_DOUBLE_MAP = <?=json_encode($decodeDoubleMap, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)?>;
         const DEFAULT_EXAMPLE = <?=json_encode($defaultExample, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)?>;
+        const DEFAULT_PREAMBLE = <?=json_encode($defaultPreamble, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)?>;
 
         window.currentDigits = '';
         window.currentGroups = '';
@@ -663,7 +679,10 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
         window.currentOtp = '';
         window.currentDigitLength = 0;
         window.currentTransmitWpm = 100;
+        window.currentPreamble = DEFAULT_PREAMBLE;
 
+        const preambleInput = document.getElementById('preambleInput');
+        const preamblePreview = document.getElementById('preamblePreview');
         const plaintextInput = document.getElementById('plaintextInput');
         const normalizedOutput = document.getElementById('normalizedOutput');
         const digitOutput = document.getElementById('digitOutput');
@@ -672,6 +691,7 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
         const otpInput = document.getElementById('otpInput');
         const cipherOutput = document.getElementById('cipherOutput');
         const transmitOutput = document.getElementById('transmitOutput');
+        const transmitPreambleOutput = document.getElementById('transmitPreambleOutput');
         const transmitSpeedInput = document.getElementById('transmitSpeedInput');
         const transmitSpeedValue = document.getElementById('transmitSpeedValue');
         const decodeCipherInput = document.getElementById('decodeCipherInput');
@@ -689,6 +709,12 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
                 .replace(/[\u0300-\u036f]/g, '')
                 .replaceAll('__ENYE__', 'Ñ')
                 .replace(/[^A-ZÑ]/g, '');
+        }
+
+        function normalizePreamble(input) {
+            return input
+                .replace(/\s+/g, ' ')
+                .trim();
         }
 
         function groupDigits(digits) {
@@ -744,12 +770,22 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
             return 1.7;
         }
 
+        function syncPreamble() {
+            const preamble = normalizePreamble(preambleInput.value);
+            window.currentPreamble = preamble || DEFAULT_PREAMBLE;
+            preambleInput.value = preamble || DEFAULT_PREAMBLE;
+            preamblePreview.textContent = window.currentPreamble;
+            transmitPreambleOutput.textContent = window.currentPreamble;
+            return window.currentPreamble;
+        }
+
         function syncEncodeOutputs(encoded) {
             normalizedOutput.textContent = encoded.normalized || 'No valid letters retained yet.';
             digitOutput.textContent = encoded.digits || 'No digits yet.';
             groupOutput.textContent = encoded.groups || 'No transmission groups yet.';
             encryptDigitsOutput.textContent = encoded.groups || 'Encode a message first.';
             syncHero(encoded.groups);
+            transmitOutput.textContent = encoded.groups || 'No grouped digits to transmit.';
         }
 
         function encodePlaintext(input) {
@@ -822,12 +858,13 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
 
         function handleEncode() {
             const encoded = encodePlaintext(plaintextInput.value);
+            window.currentCipher = '';
+            window.currentOtp = '';
             syncEncodeOutputs(encoded);
-            if (!encoded.digits) {
-                otpInput.value = '';
-                cipherOutput.textContent = 'No ciphertext yet.';
-                transmitOutput.textContent = 'No grouped ciphertext to transmit.';
-            }
+            otpInput.value = '';
+            decodeCipherInput.value = '';
+            decodeOtpInput.value = '';
+            cipherOutput.textContent = 'No ciphertext yet.';
             return encoded;
         }
 
@@ -843,9 +880,7 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
             const groups = groupDigits(cipherDigits);
             window.currentCipher = cipherDigits;
             cipherOutput.textContent = groups || 'No ciphertext yet.';
-            transmitOutput.textContent = groups || 'No grouped ciphertext to transmit.';
             decodeCipherInput.value = groups;
-            syncHero(groups);
         }
 
         function speakTransmission(groups) {
@@ -854,7 +889,7 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
                 return;
             }
 
-            const cleanGroups = groups.trim();
+            const cleanGroups = groupDigits(groups);
             if (!cleanGroups) {
                 voiceStatus.textContent = 'Nothing to transmit yet.';
                 return;
@@ -865,7 +900,8 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
                 .map((group) => group.split('').join(' '))
                 .join(' . ');
             const wpm = syncTransmitSpeed();
-            const script = `Atención. Message number 047. ${spokenGroups}. ${spokenGroups}. End of message.`;
+            const preamble = syncPreamble();
+            const script = `Atención. Preamble. ${preamble}. ${spokenGroups}. ${spokenGroups}. End of message.`;
             const utterance = new SpeechSynthesisUtterance(script);
             utterance.rate = mapWpmToSpeechRate(wpm);
             utterance.onstart = () => {
@@ -945,7 +981,11 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
         });
 
         document.getElementById('playTransmissionBtn').addEventListener('click', () => {
-            speakTransmission(transmitOutput.textContent);
+            speakTransmission(window.currentGroups);
+        });
+
+        preambleInput.addEventListener('input', () => {
+            syncPreamble();
         });
 
         transmitSpeedInput.addEventListener('change', () => {
@@ -993,6 +1033,8 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === 'selftest') {
         });
 
         document.addEventListener('DOMContentLoaded', () => {
+            preambleInput.value = DEFAULT_PREAMBLE;
+            syncPreamble();
             const encoded = handleEncode();
             syncTransmitSpeed();
             syncCipher('');
